@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() {
+      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function isSafe() {
+      return signedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accessLevel == 'safe';
+    }
+
+    match /users/{uid} {
+      allow read: if resource.data.accessLevel == 'safe' || resource.data.accessLevel == 'blacklist' || isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) && request.resource.data.uid == request.auth.uid
+        && request.resource.data.isAdmin == false;
+      allow update: if isOwner(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.isAdmin == resource.data.isAdmin
+        && request.resource.data.accessLevel == resource.data.accessLevel
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['username', 'avatarUrl', 'rank', 'mainCarId', 'publicStats', 'updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    match /garages/{garageId} {
+      allow read: if resource.data.visibility == 'public' || isOwner(resource.data.ownerId) || isAdmin();
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isOwner(resource.data.ownerId) || isAdmin();
+    }
+
+    match /meets/{meetId} {
+      allow read: if (resource.data.visibility == 'public' && resource.data.status == 'published')
+        || (signedIn() && resource.data.visibility == 'blacklist' && !isSafe()) || isAdmin();
+      allow create: if signedIn() && request.resource.data.organizerId == request.auth.uid;
+      allow update: if isAdmin() || (signedIn() && resource.data.organizerId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'coverImage', 'location', 'date', 'time', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /meetParticipants/{participantId} {
+      allow read: if signedIn();
+      allow create, delete: if signedIn() && request.resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    match /results/{resultId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /invitations/{invitationId} {
+      allow read, write: if isAdmin();
+      allow update: if isAdmin();
+    }
+
+    match /activity/{activityId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
+
